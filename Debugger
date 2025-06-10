@@ -1,13 +1,26 @@
-jeongju@jeongju-desktop:~/Desktop/MagToTheFuture$ /usr/bin/python3 /home/jeongju/Desktop/MagToTheFuture/MagToTheFuture/Hallsensors_with_MUX.py
-[INFO] Starting GY-85 magnetometer polling loop...
-[WARN] Sensor init error: [Errno 121] Remote I/O error
-[WARN] Sensor init error: [Errno 121] Remote I/O error
-[WARN] Sensor init error: [Errno 121] Remote I/O error
-[WARN] Sensor init error: [Errno 121] Remote I/O error
-[WARN] Sensor init error: [Errno 121] Remote I/O error
-[WARN] Sensor init error: [Errno 121] Remote I/O error
-Traceback (most recent call last):
-  File "/home/jeongju/Desktop/MagToTheFuture/MagToTheFuture/Hallsensors_with_MUX.py", line 46, in <module>
-    select_mux_channel(mux_addr, channel)
-  File "/home/jeongju/Desktop/MagToTheFuture/MagToTheFuture/Hallsensors_with_MUX.py", line 13, in select_mux_channel
-    bus.write_byte(mux_addr, 1 << channe
+[(141, -5, 31), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None), (None, None, None)]
+[WARN] MUX 0x70 CH1: [Errno 121] Remote I/O error
+[WARN] MUX 0x70 CH2: [Errno 121] Remote I/O error
+[WARN] MUX 0x70 CH3: [Errno 121] Remote I/O error
+[WARN] MUX 0x70 CH4: [Errno 121] Remote I/O error
+[WARN] MUX 0x70 CH5: [Errno 121] Remote I/O error
+[WARN] MUX 0x70 CH6: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH0: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH1: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH2: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH3: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH4: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH5: [Errno 121] Remote I/O error
+[WARN] MUX 0x71 CH6: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH0: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH1: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH2: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH3: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH4: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH5: [Errno 121] Remote I/O error
+[WARN] MUX 0x72 CH6: [Errno 121] Remote I/O error
+[WARN] MUX 0x73 CH0: [Errno 121] Remote I/O error
+[WARN] MUX 0x73 CH1: [Errno 121] Remote I/O error
+[WARN] MUX 0x73 CH2: [Errno 121] Remote I/O error
+[WARN] MUX 0x73 CH3: [Errno 121] Remote I/O error
+[WARN] MUX 0x73 CH4: [Errno 121] Remote I/O error
