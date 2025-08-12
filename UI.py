@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import (
     QColor, QBrush, QPen, QPainterPath, QFont, QPainter,
-    QIntValidator, QCursor, QIcon, QPolygonF
+    QIntValidator, QCursor, QIcon, QPolygonF, QDoubleValidator
 )
 from PyQt6.QtCore import Qt, QPointF, QTimer, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF, QPoint
 
@@ -200,22 +200,46 @@ class MainWindow(QMainWindow):
         patch_btn_layout.addWidget(self.add_patch_btn); patch_btn_layout.addWidget(self.remove_patch_btn)
         patch_layout.addWidget(self.patch_list); patch_layout.addLayout(patch_btn_layout); patch_group.setLayout(patch_layout)
         composer_group = QGroupBox("Haptic Composer"); composer_layout = QVBoxLayout(composer_group); self.tabs = QTabWidget()
-        force_tab = QWidget(); force_form = QFormLayout(force_tab); self.f_enabled = ToggleSwitch(); self.f_enabled.setChecked(True)
-        self.f_mode = QComboBox(); self.f_mode.addItems(["Attract", "Repel", "Lateral"]); self.f_mag = LabeledSlider("Magnitude"); self.f_mag.setValue(80)
-        self.f_dur = QLineEdit("1500"); self.f_dur.setValidator(QIntValidator()); force_form.addRow("Enable Force", self.f_enabled)
-        force_form.addRow("Mode:", self.f_mode); force_form.addRow(self.f_mag); force_form.addRow("Duration (ms):", self.f_dur)
+        
+        double_validator = QDoubleValidator(); double_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+
+        # Force Tab
+        force_tab = QWidget(); force_form = QFormLayout(force_tab); self.f_enabled = ToggleSwitch()
+        f_enable_layout = QHBoxLayout(); f_enable_layout.addStretch(); f_enable_layout.addWidget(self.f_enabled); f_enable_layout.setContentsMargins(0,0,0,0)
+        self.f_mode = QComboBox(); self.f_mode.addItems(["Attract", "Repel"]) #<-- 수정: "Lateral" 제거
+        self.f_mag = LabeledSlider("Magnitude")
+        self.f_dur = QLineEdit("3.0"); self.f_dur.setValidator(double_validator)
+        force_form.addRow("Enable Force", f_enable_layout)
+        force_form.addRow("Mode:", self.f_mode); force_form.addRow(self.f_mag); force_form.addRow("Duration (s):", self.f_dur)
+        
+        # Vibration Tab
         vib_tab = QWidget(); vib_form = QFormLayout(vib_tab); self.v_enabled = ToggleSwitch()
-        # --- 수정된 부분 시작 ---
-        self.v_freq = LabeledSlider("Frequency", 0, 500, "Hz"); self.v_freq.setValue(100)
-        # --- 수정된 부분 끝 ---
-        self.v_amp = LabeledSlider("Amplitude"); self.v_amp.setValue(50); self.v_dur = QLineEdit("1500"); self.v_dur.setValidator(QIntValidator())
-        vib_form.addRow("Enable Vibration", self.v_enabled); vib_form.addRow(self.v_freq); vib_form.addRow(self.v_amp); vib_form.addRow("Duration (ms):", self.v_dur)
+        v_enable_layout = QHBoxLayout(); v_enable_layout.addStretch(); v_enable_layout.addWidget(self.v_enabled); v_enable_layout.setContentsMargins(0,0,0,0)
+        self.v_mode = QComboBox(); self.v_mode.addItems(["Attract", "Repel"]) #<-- 수정: "Lateral" 제거
+        self.v_freq = LabeledSlider("Frequency", 1, 500, "Hz")
+        self.v_amp = LabeledSlider("Amplitude"); self.v_dur = QLineEdit("3.0"); self.v_dur.setValidator(double_validator)
+        vib_form.addRow("Enable Vibration", v_enable_layout); vib_form.addRow("Mode:", self.v_mode)
+        vib_form.addRow(self.v_freq); vib_form.addRow(self.v_amp); vib_form.addRow("Duration (s):", self.v_dur)
+        
+        # Heat Tab
         heat_tab = QWidget(); heat_form = QFormLayout(heat_tab); self.h_enabled = ToggleSwitch()
-        self.h_dur = QLineEdit("3000"); self.h_dur.setValidator(QIntValidator()); heat_form.addRow("Enable Heat", self.h_enabled); heat_form.addRow("Duration (ms):", self.h_dur)
+        h_enable_layout = QHBoxLayout(); h_enable_layout.addStretch(); h_enable_layout.addWidget(self.h_enabled); h_enable_layout.setContentsMargins(0,0,0,0)
+        self.h_dur = QLineEdit("3.0"); self.h_dur.setValidator(double_validator)
+        heat_form.addRow("Enable Heat", h_enable_layout); heat_form.addRow("Duration (s):", self.h_dur)
+
         self.tabs.addTab(force_tab, "🖐️ Force"); self.tabs.addTab(vib_tab, "📳 Vibration"); self.tabs.addTab(heat_tab, "🔥 Heat")
-        composer_layout.addWidget(self.tabs); self.add_or_update_haptic_btn = QPushButton("➕ Add Haptic Block"); self.add_or_update_haptic_btn.clicked.connect(self.add_or_update_haptic_block)
+        
+        self.f_mode.currentTextChanged.connect(self.on_force_mode_changed)
+        self.v_mode.currentTextChanged.connect(self.on_vibration_mode_changed)
+        
+        composer_layout.addWidget(self.tabs)
+        self.add_or_update_haptic_btn = QPushButton("➕ Add Haptic Block")
+        self.add_or_update_haptic_btn.clicked.connect(self.add_or_update_haptic_block)
         composer_layout.addWidget(self.add_or_update_haptic_btn)
+
         main_layout.addWidget(hw_group); main_layout.addWidget(patch_group); main_layout.addWidget(composer_group); main_layout.addStretch()
+        
+        self.reset_composer_to_defaults()
         return main_widget
 
     def create_sequence_panel(self):
@@ -232,15 +256,50 @@ class MainWindow(QMainWindow):
         self.sequence_list.itemDoubleClicked.connect(self.edit_sequence_block)
         btn_layout = QHBoxLayout(); self.delete_block_btn = QPushButton("Delete Selected");
         self.delete_block_btn.setObjectName("DangerButton"); self.delete_block_btn.clicked.connect(self.delete_sequence_block); btn_layout.addStretch(); btn_layout.addWidget(self.delete_block_btn)
-        exec_layout = QHBoxLayout()
-        self.simulate_btn = QPushButton("▶️ Run Simulation"); self.simulate_btn.setObjectName("PrimaryButton"); self.simulate_btn.clicked.connect(self.toggle_simulation)
+        
+        exec_group = QGroupBox("Execution"); exec_layout = QVBoxLayout(exec_group)
+        sim_layout = QHBoxLayout()
+        self.simulate_btn = QPushButton("▶️ Run Simulation"); self.simulate_btn.setObjectName("PrimaryButton")
+        self.simulate_btn.clicked.connect(self.toggle_simulation)
+        sim_layout.addWidget(self.simulate_btn)
+        hw_layout = QHBoxLayout()
         self.send_to_hw_btn = QPushButton("🚀 Send to Actuator"); self.send_to_hw_btn.clicked.connect(self.run_hardware_sequence)
-        exec_layout.addWidget(self.simulate_btn, 1); exec_layout.addWidget(self.send_to_hw_btn, 1)
+        self.stop_hw_btn = QPushButton("🛑 Emergency Stop")
+        self.stop_hw_btn.setObjectName("DangerButton")
+        self.stop_hw_btn.clicked.connect(self.emergency_stop)
+        hw_layout.addWidget(self.send_to_hw_btn, 2); hw_layout.addWidget(self.stop_hw_btn, 1)
+        exec_layout.addLayout(sim_layout); exec_layout.addLayout(hw_layout)
+
         seq_layout.addWidget(QLabel("Drag to reorder. Dbl-Click to edit.", objectName="HintLabel")); seq_layout.addWidget(self.sequence_list)
-        seq_layout.addLayout(btn_layout); seq_layout.addLayout(exec_layout)
+        seq_layout.addLayout(btn_layout); seq_layout.addWidget(exec_group)
         layout.addWidget(traj_group); layout.addWidget(sequence_group); layout.addStretch()
         return main_widget
     
+    def on_force_mode_changed(self, text):
+        self.v_mode.blockSignals(True)
+        self.v_mode.setCurrentText(text)
+        self.v_mode.blockSignals(False)
+
+    def on_vibration_mode_changed(self, text):
+        self.f_mode.blockSignals(True)
+        self.f_mode.setCurrentText(text)
+        self.f_mode.blockSignals(False)
+
+    def reset_composer_to_defaults(self):
+        self.f_enabled.setChecked(False)
+        self.v_enabled.setChecked(False)
+        self.h_enabled.setChecked(False)
+        self.f_mode.setCurrentIndex(0)
+        self.v_mode.setCurrentIndex(0)
+        self.f_mag.setValue(100)
+        self.v_amp.setValue(100)
+        self.v_freq.setValue(100)
+        self.f_dur.setText("3.0")
+        self.v_dur.setText("3.0")
+        self.h_dur.setText("3.0")
+        self.editing_block_index = None
+        self.add_or_update_haptic_btn.setText("➕ Add Haptic Block")
+
     def populate_ports(self):
         self.port_combo.clear()
         ports = serial.tools.list_ports.comports()
@@ -261,13 +320,27 @@ class MainWindow(QMainWindow):
 
     def check_arduino_ready(self):
         if not self.arduino: return
-        self.arduino.flushInput(); self.arduino.write(b"R\n")
-        line = self.arduino.readline().decode('utf-8').strip()
-        if "Ready" in line:
-            self.status_label.setText(f"Status: Connected"); self.connect_btn.setText("Disconnect")
-        else:
-            self.status_label.setText("Status: No response"); self.toggle_connection()
-    
+        try:
+            self.arduino.flushInput()
+            self.arduino.write(b"R\n")
+            line = self.arduino.readline().decode('utf-8').strip()
+            if "Ready" in line:
+                self.status_label.setText(f"Status: Connected"); self.connect_btn.setText("Disconnect")
+            else:
+                self.status_label.setText("Status: No response"); self.connect_btn.setChecked(False); self.arduino.close(); self.arduino = None
+        except serial.SerialException as e:
+            self.status_label.setText(f"Status: Port Error"); self.connect_btn.setChecked(False); self.arduino = None
+
+    def emergency_stop(self):
+        print("🛑 EMERGENCY STOP TRIGGERED!")
+        if self.is_simulating: self.stop_simulation()
+        if self.is_hardware_running:
+            self.is_hardware_running = False
+            self.send_to_hw_btn.setText("🚀 Send to Actuator")
+        if self.arduino and self.arduino.is_open:
+            stop_cmd = "H,0,0,0,0,0,0,0\n"
+            self.arduino.write(stop_cmd.encode('utf-8'))
+
     def add_patch(self):
         patch_id = self.next_patch_id; self.next_patch_id += 1
         x = random.uniform(10, DEVICE_WIDTH_MM - 30); y = random.uniform(10, DEVICE_HEIGHT_MM - 40)
@@ -290,9 +363,13 @@ class MainWindow(QMainWindow):
         self.selected_patch_id = None
     
     def on_patch_selected(self, row):
-        if row < 0: self.selected_patch_id = None; 
+        if row < 0:
+            self.selected_patch_id = None
+            if self.editing_block_index is not None: self.reset_composer_to_defaults()
         else:
-            list_item = self.patch_list.item(row); patch_id = list_item.data(Qt.ItemDataRole.UserRole); self.selected_patch_id = patch_id
+            list_item = self.patch_list.item(row)
+            patch_id = list_item.data(Qt.ItemDataRole.UserRole)
+            self.selected_patch_id = patch_id
         for pid, item in self.patch_items.items(): item.select(pid == self.selected_patch_id)
 
     def canvas_mouse_press(self, event):
@@ -337,26 +414,34 @@ class MainWindow(QMainWindow):
 
     def add_or_update_haptic_block(self):
         if not self.selected_patch_id: return
-        config = {"force": {"enabled": self.f_enabled.isChecked(), "mode": self.f_mode.currentText(), "magnitude": self.f_mag.value(), "duration": int(self.f_dur.text())},
-                  "vibration": {"enabled": self.v_enabled.isChecked(), "frequency": self.v_freq.value(), "amplitude": self.v_amp.value(), "duration": int(self.v_dur.text())},
-                  "heat": {"enabled": self.h_enabled.isChecked(), "duration": int(self.h_dur.text())}}
+        try:
+            config = {
+                "force": {"enabled": self.f_enabled.isChecked(), "mode": self.f_mode.currentText(), "magnitude": self.f_mag.value(), "duration": int(float(self.f_dur.text()) * 1000)},
+                "vibration": {"enabled": self.v_enabled.isChecked(), "mode": self.v_mode.currentText(), "frequency": self.v_freq.value(), "amplitude": self.v_amp.value(), "duration": int(float(self.v_dur.text()) * 1000)},
+                "heat": {"enabled": self.h_enabled.isChecked(), "duration": int(float(self.h_dur.text()) * 1000)}
+            }
+        except (ValueError,TypeError):
+            print("Error: Invalid duration value. Please enter a valid number.")
+            return
+
         if not any(c['enabled'] for c in config.values()): return
         if self.editing_block_index is not None:
             self.sequence_blocks[self.editing_block_index]['config'] = config
-            self.editing_block_index = None; self.add_or_update_haptic_btn.setText("➕ Add Haptic Block")
         else:
             block = {"type": "HAPTIC", "patch_id": self.selected_patch_id, "config": config}
             self.sequence_blocks.append(block)
+        
         self.update_sequence_list()
+        self.reset_composer_to_defaults()
 
     def edit_sequence_block(self, item):
         row = self.sequence_list.row(item); block = self.sequence_blocks[row]
         if block['type'] == 'HAPTIC':
             self.editing_block_index = row; self.add_or_update_haptic_btn.setText("💾 Update Haptic Block")
             config = block['config']
-            self.f_enabled.setChecked(config['force']['enabled']); self.f_mode.setCurrentText(config['force']['mode']); self.f_mag.setValue(config['force']['magnitude']); self.f_dur.setText(str(config['force']['duration']))
-            self.v_enabled.setChecked(config['vibration']['enabled']); self.v_freq.setValue(config['vibration']['frequency']); self.v_amp.setValue(config['vibration']['amplitude']); self.v_dur.setText(str(config['vibration']['duration']))
-            self.h_enabled.setChecked(config['heat']['enabled']); self.h_dur.setText(str(config['heat']['duration']))
+            self.f_enabled.setChecked(config['force']['enabled']); self.f_mode.setCurrentText(config['force']['mode']); self.f_mag.setValue(config['force']['magnitude']); self.f_dur.setText(str(config['force']['duration'] / 1000.0))
+            self.v_enabled.setChecked(config['vibration']['enabled']); self.v_mode.setCurrentText(config.get('vibration', {}).get('mode', 'Attract')); self.v_freq.setValue(config['vibration']['frequency']); self.v_amp.setValue(config['vibration']['amplitude']); self.v_dur.setText(str(config['vibration']['duration'] / 1000.0))
+            self.h_enabled.setChecked(config['heat']['enabled']); self.h_dur.setText(str(config['heat']['duration'] / 1000.0))
             if config['force']['enabled']: self.tabs.setCurrentIndex(0)
             elif config['vibration']['enabled']: self.tabs.setCurrentIndex(1)
             elif config['heat']['enabled']: self.tabs.setCurrentIndex(2)
@@ -479,21 +564,19 @@ class MainWindow(QMainWindow):
             print("Arduino not connected or sequence already running."); return
         if not self.sequence_blocks: return
         self.is_hardware_running = True; self.hardware_step_index = 0
-        self.hw_actuator_pos = QPointF(0, 0) # 원점에서 시작
-        self.send_to_hw_btn.setText("⏹️ Stop Hardware"); self.send_next_hw_step()
+        self.hw_actuator_pos = QPointF(0, 0)
+        self.send_to_hw_btn.setText("⏹️ Stop Hardware")
+        self.send_next_hw_step()
 
     def send_next_hw_step(self):
         if not self.is_hardware_running: return
         if self.hardware_step_index >= len(self.sequence_blocks):
-            # --- 수정된 부분 시작 ---
-            print("Sequence finished. Returning to origin.")
-            final_cmd = "M,0.0,0.0\n"
-            self.arduino.write(final_cmd.encode('utf-8'))
-            self.hw_state = "RETURNING_HOME"
-            QTimer.singleShot(100, self.wait_for_hw_ok)
-            # --- 수정된 부분 끝 ---
+            print("Sequence finished. Stopping haptics and returning to origin.")
+            stop_cmd = "H,0,0,0,0,0,0,0\n"
+            self.arduino.write(stop_cmd.encode('utf-8'))
+            QTimer.singleShot(200, self.return_hw_to_origin)
             return
-
+            
         self.hw_state = "TRAVELING"
         block = self.sequence_blocks[self.hardware_step_index]
         patch_id = block['patch_id']
@@ -502,14 +585,20 @@ class MainWindow(QMainWindow):
         if block['type'] == 'MOVE':
             target_pos = block['trajectory'][0]
         elif block['type'] == 'HAPTIC':
-            # 하드웨어 실행 시에는 패치의 '현재' 위치를 사용
             patch_item = self.patch_items[patch_id]
-            target_pos = patch_item.pos() + QPointF(10, 15) # 중심점
+            target_pos = patch_item.pos() + QPointF(10, 15)
 
         cmd_str = f"M,{target_pos.x()},{target_pos.y()}\n"
         print(f"Sending travel command: {cmd_str.strip()}")
         self.arduino.write(cmd_str.encode('utf-8'))
         self.hw_actuator_pos = target_pos
+        QTimer.singleShot(100, self.wait_for_hw_ok)
+
+    def return_hw_to_origin(self):
+        if not self.arduino or not self.arduino.is_open: return
+        final_cmd = "M,0.0,0.0\n"
+        self.arduino.write(final_cmd.encode('utf-8'))
+        self.hw_state = "RETURNING_HOME"
         QTimer.singleShot(100, self.wait_for_hw_ok)
 
     def wait_for_hw_ok(self):
@@ -521,14 +610,28 @@ class MainWindow(QMainWindow):
                 if self.hw_state == "TRAVELING":
                     self.execute_hw_action()
                 elif self.hw_state == "ACTION":
-                    self.hardware_step_index += 1
-                    self.send_next_hw_step()
+                    block = self.sequence_blocks[self.hardware_step_index]
+                    duration = 0
+                    if block['type'] == 'HAPTIC':
+                        c = block['config']
+                        durations = [d['duration'] for d in c.values() if d['enabled']]
+                        duration = max(durations) if durations else 0
+                    
+                    print(f"Action received. Waiting for {duration}ms before next step.") #<-- 디버깅용 프린트
+                    QTimer.singleShot(duration, self.proceed_to_next_step)
+
                 elif self.hw_state == "RETURNING_HOME":
                     self.is_hardware_running = False
                     self.send_to_hw_btn.setText("🚀 Send to Actuator")
                     print("Hardware sequence finished.")
         else:
             QTimer.singleShot(100, self.wait_for_hw_ok)
+    
+    def proceed_to_next_step(self):
+        if not self.is_hardware_running: return
+        print("Proceeding to next step...") #<-- 디버깅용 프린트
+        self.hardware_step_index += 1
+        self.send_next_hw_step()
 
     def execute_hw_action(self):
         self.hw_state = "ACTION"
@@ -545,11 +648,20 @@ class MainWindow(QMainWindow):
                 if c['force']['mode'] == 'Attract': force_mode = 1
                 elif c['force']['mode'] == 'Repel': force_mode = 2
                 else: force_mode = 3
+            vibration_mode = 0
+            if c['vibration']['enabled']:
+                if c.get('vibration', {}).get('mode', 'Attract') == 'Attract': vibration_mode = 1
+                elif c.get('vibration', {}).get('mode', 'Attract') == 'Repel': vibration_mode = 2
+                else: vibration_mode = 3
             mag = int(c['force']['magnitude'] * 2.55) if c['force']['enabled'] else 0
             freq = c['vibration']['frequency'] if c['vibration']['enabled'] else 0
             amp = int(c['vibration']['amplitude'] * 2.55) if c['vibration']['enabled'] else 0
-            heat_dur = c['heat']['duration'] if c['heat']['enabled'] else 0
-            cmd_str = f"H,{force_mode},{mag},{freq},{amp},{heat_dur}\n"
+            
+            durations = [d['duration'] for d in c.values() if d['enabled']]
+            max_duration = max(durations) if durations else 0
+            heat_on_flag = 1 if c['heat']['enabled'] else 0
+            
+            cmd_str = f"H,{force_mode},{mag},{vibration_mode},{freq},{amp},{max_duration},{heat_on_flag}\n"
         
         if cmd_str:
             print(f"Sending action command: {cmd_str.strip()}")
