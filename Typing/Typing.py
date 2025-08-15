@@ -72,13 +72,20 @@ class TimedTypingTestApp:
         chosen_file = ""
         try:
             chosen_file = random.choice(FILE_NAMES)
+            
+            # ### FIX: 한글 경로 문제를 해결하기 위해 절대 경로 사용 ###
+            # 현재 실행 중인 스크립트 파일의 디렉토리 경로를 가져옵니다.
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            # 스크립트 디렉토리와 파일 이름을 합쳐 완전한 파일 경로를 만듭니다.
+            full_path = os.path.join(script_dir, chosen_file)
+
             # utf-8-sig 인코딩으로 파일을 열어보고, 실패 시 다른 인코딩으로 재시도
             try:
-                with open(chosen_file, 'r', encoding='utf-8-sig') as f:
+                with open(full_path, 'r', encoding='utf-8-sig') as f:
                     return f.read().strip().replace('\r\n', '\n')
             except UnicodeDecodeError:
                 # 영문 파일 등을 위한 기본 인코딩(cp949 등)으로 재시도
-                with open(chosen_file, 'r', encoding='cp949') as f:
+                with open(full_path, 'r', encoding='cp949') as f:
                     return f.read().strip().replace('\r\n', '\n')
         except FileNotFoundError:
             error_msg = f"파일을 찾을 수 없습니다: '{chosen_file}'\n\n실행 파일(.py)과 텍스트 파일(.txt, .dat)이 같은 폴더에 있는지 확인해주세요."
@@ -134,8 +141,6 @@ class TimedTypingTestApp:
                 self.update_timer()
 
         if event.keysym == "space":
-            # ### FIX: 커서 위치 계산 방식을 변경하여 줄바꿈 오류 수정 ###
-            # 시작부터 현재 커서까지의 텍스트를 가져와 그 길이를 현재 위치로 사용합니다.
             text_before_cursor = self.input_text.get("1.0", tk.INSERT)
             current_pos = len(text_before_cursor)
             
