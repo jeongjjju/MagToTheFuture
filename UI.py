@@ -20,7 +20,8 @@ from PyQt6.QtCore import Qt, QPointF, QTimer, QSize, QPropertyAnimation, QEasing
 # --- 상수 정의 ---
 DEVICE_WIDTH_MM = 350
 DEVICE_HEIGHT_MM = 260
-HAPTIC_ICONS = {"force": "🖐️", "vibration": "📳", "heat": "🔥"}
+# "wait" 아이콘 추가
+HAPTIC_ICONS = {"force": "🖐️", "vibration": "📳", "heat": "🔥", "wait": "⌛"}
 PATCH_COLORS = [
     QColor("#0D6EFD"), QColor("#6F42C1"), QColor("#D63384"),
     QColor("#FD7E14"), QColor("#198754"), QColor("#0DCAF0"),
@@ -303,7 +304,20 @@ class MainWindow(QMainWindow):
         self.h_dur = QLineEdit("3.0"); self.h_dur.setValidator(double_validator)
         heat_form.addRow("Enable Heat", h_enable_layout); heat_form.addRow("Duration (s):", self.h_dur)
 
-        self.tabs.addTab(force_tab, "🖐️ Force"); self.tabs.addTab(vib_tab, "📳 Vibration"); self.tabs.addTab(heat_tab, "🔥 Heat")
+        # Wait Tab (NEW)
+        wait_tab = QWidget()
+        wait_form = QFormLayout(wait_tab)
+        self.w_enabled = ToggleSwitch()
+        w_enable_layout = QHBoxLayout()
+        w_enable_layout.addStretch()
+        w_enable_layout.addWidget(self.w_enabled)
+        w_enable_layout.setContentsMargins(0,0,0,0)
+        self.w_dur = QLineEdit("1.0")
+        self.w_dur.setValidator(double_validator)
+        wait_form.addRow("Enable Wait", w_enable_layout)
+        wait_form.addRow("Duration (s):", self.w_dur)
+
+        self.tabs.addTab(force_tab, "🖐️ Force"); self.tabs.addTab(vib_tab, "📳 Vibration"); self.tabs.addTab(heat_tab, "🔥 Heat"); self.tabs.addTab(wait_tab, "⌛ Wait")
 
         self.f_mode.currentTextChanged.connect(self.on_force_mode_changed)
         self.v_mode.currentTextChanged.connect(self.on_vibration_mode_changed)
@@ -382,6 +396,7 @@ class MainWindow(QMainWindow):
         self.f_enabled.setChecked(False)
         self.v_enabled.setChecked(False)
         self.h_enabled.setChecked(False)
+        self.w_enabled.setChecked(False) # Reset wait
         self.f_mode.setCurrentIndex(0)
         self.v_mode.setCurrentIndex(0)
         self.f_mag.setValue(100)
@@ -390,6 +405,7 @@ class MainWindow(QMainWindow):
         self.f_dur.setText("3.0")
         self.v_dur.setText("3.0")
         self.h_dur.setText("3.0")
+        self.w_dur.setText("1.0") # Reset wait duration
         self.wait_for_move_cb.setChecked(True)
         self.editing_block_index = None
         self.add_or_update_haptic_btn.setText("➕ Add Haptic Block")
@@ -674,12 +690,14 @@ class MainWindow(QMainWindow):
                 "force": {"enabled": self.f_enabled.isChecked(), "mode": self.f_mode.currentText(), "magnitude": self.f_mag.value(), "duration": int(float(self.f_dur.text()) * 1000)},
                 "vibration": {"enabled": self.v_enabled.isChecked(), "mode": self.v_mode.currentText(), "frequency": self.v_freq.value(), "amplitude": self.v_amp.value(), "duration": int(float(self.v_dur.text()) * 1000)},
                 "heat": {"enabled": self.h_enabled.isChecked(), "duration": int(float(self.h_dur.text()) * 1000)},
+                "wait": {"enabled": self.w_enabled.isChecked(), "duration": int(float(self.w_dur.text()) * 1000)}, # Add wait config
                 "wait_for_move": self.wait_for_move_cb.isChecked()
             }
         except (ValueError, TypeError):
             print("Error: Invalid duration value. Please enter a valid number.")
             return
 
+        # Check if any haptic or wait is enabled
         if not any(c['enabled'] for name, c in config.items() if name != 'wait_for_move'): return
 
         if self.editing_block_index is not None:
@@ -699,11 +717,19 @@ class MainWindow(QMainWindow):
             self.f_enabled.setChecked(config['force']['enabled']); self.f_mode.setCurrentText(config['force']['mode']); self.f_mag.setValue(config['force']['magnitude']); self.f_dur.setText(str(config['force']['duration'] / 1000.0))
             self.v_enabled.setChecked(config['vibration']['enabled']); self.v_mode.setCurrentText(config.get('vibration', {}).get('mode', 'Attract')); self.v_freq.setValue(config['vibration']['frequency']); self.v_amp.setValue(config['vibration']['amplitude']); self.v_dur.setText(str(config['vibration']['duration'] / 1000.0))
             self.h_enabled.setChecked(config['heat']['enabled']); self.h_dur.setText(str(config['heat']['duration'] / 1000.0))
+            
+            # Load wait config
+            wait_config = config.get('wait', {'enabled': False, 'duration': 1000})
+            self.w_enabled.setChecked(wait_config['enabled'])
+            self.w_dur.setText(str(wait_config['duration'] / 1000.0))
+
             self.wait_for_move_cb.setChecked(config.get('wait_for_move', True))
 
             if config['force']['enabled']: self.tabs.setCurrentIndex(0)
             elif config['vibration']['enabled']: self.tabs.setCurrentIndex(1)
             elif config['heat']['enabled']: self.tabs.setCurrentIndex(2)
+            elif wait_config['enabled']: self.tabs.setCurrentIndex(3)
+
 
     def delete_sequence_block(self):
         selected_items = self.sequence_list.selectedItems()
@@ -732,7 +758,7 @@ class MainWindow(QMainWindow):
                 patch_item.setPos(self.initial_patch_positions[patch_id])
 
         for block in self.sequence_blocks:
-            if block['type'] == 'MOVE' and block.get('haptic_on_move', 'None') != 'None':
+            if block['type'] == 'MOVE':
                 patch_id = block['patch_id']
                 patch_item = self.patch_items.get(patch_id)
                 if patch_item:
@@ -755,7 +781,7 @@ class MainWindow(QMainWindow):
                 item.setText(f"{i+1}. MOVE P{patch_id} Trajectory")
             else:
                 enabled = [name for name, conf in block['config'].items() if isinstance(conf, dict) and conf.get('enabled')]
-                icons = " ".join([HAPTIC_ICONS[m] for m in enabled])
+                icons = " ".join([HAPTIC_ICONS[m] for m in enabled if m in HAPTIC_ICONS])
                 item.setText(f"{i+1}. HAPTIC on P{patch_id} {icons}")
             item.setForeground(color)
             self.sequence_list.addItem(item)
@@ -788,7 +814,10 @@ class MainWindow(QMainWindow):
             print("Arduinos not connected or sequence already running."); return
         if not self.sequence_blocks: return
         
-        self.update_all_patch_visuals() # 시퀀스 시작 전 최종 위치를 한 번 계산해서 보여줌
+        # Reset all visual patch positions to their initial state before running
+        for patch_id, initial_pos in self.initial_patch_positions.items():
+            if patch_id in self.patch_items:
+                self.patch_items[patch_id].setPos(initial_pos)
 
         self.is_hardware_running = True
         self.hardware_step_index = 0
@@ -806,11 +835,12 @@ class MainWindow(QMainWindow):
         print(f"\nExecuting Block {self.hardware_step_index + 1}/{len(self.sequence_blocks)}: {block['type']}")
 
         if block['type'] == 'MOVE':
-            self.hardware_waypoint_index = 0
+            self.hardware_waypoint_index = 1 # Start from the first waypoint
             self.send_next_hw_waypoint()
 
         elif block['type'] == 'HAPTIC':
             patch_id = block['patch_id']
+            # Get the *current* conceptual position of the patch, which may have been updated by a previous MOVE
             target_pos = self.get_conceptual_patch_center(patch_id)
             
             scaled_x = target_pos.x() * UI_TO_REAL_SCALE_X
@@ -841,19 +871,28 @@ class MainWindow(QMainWindow):
         c = block['config']
         force_mode = 0
         if c['force']['enabled']: force_mode = 1 if c['force']['mode'] == 'Attract' else 2
+        
         vibration_mode = 0
         if c['vibration']['enabled']: vibration_mode = 1 if c.get('vibration', {}).get('mode') == 'Attract' else 2
+        
         mag = int(c['force']['magnitude'] * 2.55) if c['force']['enabled'] else 0
         freq = c['vibration']['frequency'] if c['vibration']['enabled'] else 0
         amp = int(c['vibration']['amplitude'] * 2.55) if c['vibration']['enabled'] else 0
+        
+        # Calculate max duration including wait time
         durations = [d['duration'] for n, d in c.items() if n != 'wait_for_move' and d.get('enabled')]
         max_duration = max(durations) if durations else 0
+        
         heat_on = 1 if c['heat']['enabled'] else 0
+        
+        # The command sent to the actuator doesn't need to know about "wait",
+        # as the wait is handled by the Python script's QTimer.
         cmd = f"H,{force_mode},{mag},{vibration_mode},{freq},{amp},{max_duration},{heat_on}\n"
         
         print(f"  - Move complete. Sending to Actuator: {cmd.strip()}")
         self.actuator_arduino.write(cmd.encode())
         
+        # The timer waits for the longest specified duration before proceeding.
         QTimer.singleShot(max_duration + 200, self.proceed_to_next_block)
 
 
@@ -863,6 +902,7 @@ class MainWindow(QMainWindow):
         trajectory = block['trajectory']
         haptic_type = block.get('haptic_on_move', 'None')
 
+        # Start haptics on the first move segment
         if self.hardware_waypoint_index == 1:
             if haptic_type != 'None':
                 self.moving_patch_id = block['patch_id']
@@ -883,15 +923,16 @@ class MainWindow(QMainWindow):
                     print("  - Stopping haptics-on-move.")
                     self.actuator_arduino.write(b"H,0,0,0,0,0,0,0\n")
                 
+                # Update the patch's base position permanently after a move
                 patch_id = block['patch_id']
                 patch_item = self.patch_items.get(patch_id)
                 if patch_item:
                     end_point = trajectory[-1]
                     new_pos = end_point - QPointF(10, 15)
-                    self.initial_patch_positions[patch_id] = new_pos # MODIFIED: 영구적으로 위치 업데이트
+                    self.initial_patch_positions[patch_id] = new_pos
                     patch_item.setPos(new_pos)
-                    print(f"  - Patch {patch_id} position updated to ({new_pos.x():.1f}, {new_pos.y():.1f})")
-                
+                    print(f"  - Patch {patch_id} final position updated to ({new_pos.x():.1f}, {new_pos.y():.1f})")
+            
             self.moving_patch_id = None
             
             self.proceed_to_next_block()
@@ -937,7 +978,10 @@ class MainWindow(QMainWindow):
 
         if not finished:
             print("Resetting patch positions due to stop.")
-            self.update_all_patch_visuals()
+            # Reset all visual patch positions to their initial state
+            for patch_id, initial_pos in self.initial_patch_positions.items():
+                if patch_id in self.patch_items:
+                    self.patch_items[patch_id].setPos(initial_pos)
 
         if self.actuator_arduino and self.actuator_arduino.is_open:
             self.actuator_arduino.write(b"H,0,0,0,0,0,0,0\n")
