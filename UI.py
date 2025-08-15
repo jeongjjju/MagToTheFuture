@@ -161,6 +161,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
         self.initialize_state()
         self.setup_ui()
+        self.randomize_patch_inputs() # Randomize for the first patch
         self.add_patch()
         self.patch_list.setCurrentRow(0)
 
@@ -262,6 +263,40 @@ class MainWindow(QMainWindow):
         self.patch_list = QListWidget()
         self.patch_list.setSpacing(5)
         self.patch_list.currentRowChanged.connect(self.on_patch_selected)
+        patch_layout.addWidget(self.patch_list)
+
+        # --- Patch Position Control ---
+        patch_pos_group = QGroupBox("Patch Position")
+        patch_pos_group.setStyleSheet("QGroupBox { margin-top: 5px; }")
+        pos_form_layout = QFormLayout(patch_pos_group)
+
+        pos_input_layout = QHBoxLayout()
+        self.patch_x_input = QLineEdit()
+        self.patch_x_input.setValidator(QDoubleValidator(0, DEVICE_WIDTH_MM, 2))
+        self.patch_y_input = QLineEdit()
+        self.patch_y_input.setValidator(QDoubleValidator(0, DEVICE_HEIGHT_MM, 2))
+        pos_input_layout.addWidget(QLabel("X:"))
+        pos_input_layout.addWidget(self.patch_x_input)
+        pos_input_layout.addWidget(QLabel("Y:"))
+        pos_input_layout.addWidget(self.patch_y_input)
+
+        pos_button_layout = QHBoxLayout()
+        self.update_pos_btn = QPushButton("🔄 Update Position")
+        self.update_pos_btn.clicked.connect(self.update_selected_patch_position)
+        self.update_pos_btn.setEnabled(False)  # Initially disabled
+
+        randomize_pos_btn = QPushButton("🎲 Randomize")
+        randomize_pos_btn.setToolTip("Randomize Position for New Patch")
+        randomize_pos_btn.clicked.connect(self.randomize_patch_inputs)
+
+        pos_button_layout.addWidget(self.update_pos_btn)
+        pos_button_layout.addWidget(randomize_pos_btn)
+
+        pos_form_layout.addRow(pos_input_layout)
+        pos_form_layout.addRow(pos_button_layout)
+        patch_layout.addWidget(patch_pos_group)
+        # --- End ---
+
         patch_btn_layout = QHBoxLayout()
         self.add_patch_btn = QPushButton("➕ Add New Patch")
         self.add_patch_btn.clicked.connect(self.add_patch)
@@ -270,7 +305,6 @@ class MainWindow(QMainWindow):
         self.remove_patch_btn.clicked.connect(self.remove_selected_patch)
         patch_btn_layout.addWidget(self.add_patch_btn)
         patch_btn_layout.addWidget(self.remove_patch_btn)
-        patch_layout.addWidget(self.patch_list)
         patch_layout.addLayout(patch_btn_layout)
 
         composer_group = QGroupBox("Haptic Composer")
@@ -304,7 +338,7 @@ class MainWindow(QMainWindow):
         self.h_dur = QLineEdit("3.0"); self.h_dur.setValidator(double_validator)
         heat_form.addRow("Enable Heat", h_enable_layout); heat_form.addRow("Duration (s):", self.h_dur)
 
-        # Wait Tab (NEW)
+        # Wait Tab
         wait_tab = QWidget()
         wait_form = QFormLayout(wait_tab)
         self.w_enabled = ToggleSwitch()
@@ -532,13 +566,32 @@ class MainWindow(QMainWindow):
         if self.is_simulating: self.stop_simulation()
         self.stop_hardware_sequence(finished=False)
 
+    def randomize_patch_inputs(self):
+        """Populates the X and Y input fields with random coordinates."""
+        x = random.uniform(10, DEVICE_WIDTH_MM - 30)
+        y = random.uniform(10, DEVICE_HEIGHT_MM - 40)
+        self.patch_x_input.setText(f"{x:.1f}")
+        self.patch_y_input.setText(f"{y:.1f}")
+
     def add_patch(self):
+        """Adds a new patch using the coordinates from the input fields."""
+        try:
+            x = float(self.patch_x_input.text())
+            y = float(self.patch_y_input.text())
+        except ValueError:
+            print("Invalid coordinates in input fields. Please enter numbers.")
+            return
+
+        # Validate range
+        if not (0 <= x <= DEVICE_WIDTH_MM and 0 <= y <= DEVICE_HEIGHT_MM):
+            print(f"Coordinates out of bounds. X must be 0-{DEVICE_WIDTH_MM}, Y must be 0-{DEVICE_HEIGHT_MM}.")
+            return
+
         patch_id = 1
         existing_ids = set(self.patch_items.keys())
         while patch_id in existing_ids:
             patch_id += 1
 
-        x = random.uniform(10, DEVICE_WIDTH_MM - 30); y = random.uniform(10, DEVICE_HEIGHT_MM - 40)
         color = PATCH_COLORS[(patch_id - 1) % len(PATCH_COLORS)]
         patch_item = PatchItem(patch_id, x, y, color)
         self.scene.addItem(patch_item)
@@ -551,7 +604,6 @@ class MainWindow(QMainWindow):
         self.patch_list.addItem(list_item)
         self.patch_list.setCurrentItem(list_item)
 
-    # MODIFIED: 안정적인 삭제 로직
     def remove_selected_patch(self):
         if self.selected_patch_id is None: return
         
@@ -570,7 +622,7 @@ class MainWindow(QMainWindow):
         
         self.update_patch_list()
         self.update_sequence_list()
-        self.update_all_patch_visuals()
+        self.reset_patches_to_initial_pos()
         
         self.patch_list.blockSignals(False)
         self.on_patch_selected(self.patch_list.currentRow())
@@ -602,19 +654,73 @@ class MainWindow(QMainWindow):
         else:
             self.patch_list.setCurrentRow(-1)
 
-
     def on_patch_selected(self, row):
         if row < 0:
             self.selected_patch_id = None
-            if self.editing_block_index is not None: self.reset_composer_to_defaults()
+            self.update_pos_btn.setEnabled(False)
+            self.patch_x_input.clear()
+            self.patch_y_input.clear()
+            if self.editing_block_index is not None:
+                self.reset_composer_to_defaults()
         else:
             item = self.patch_list.item(row)
             if item:
                 patch_id = item.data(Qt.ItemDataRole.UserRole)
                 self.selected_patch_id = patch_id
+
+                patch_item = self.patch_items.get(patch_id)
+                if patch_item:
+                    # Use the initial position for the text boxes for consistency
+                    pos = self.initial_patch_positions.get(patch_id, QPointF(0, 0))
+                    self.patch_x_input.setText(f"{pos.x():.1f}")
+                    self.patch_y_input.setText(f"{pos.y():.1f}")
+                
+                self.update_pos_btn.setEnabled(True)
         
         for pid, patch_item in self.patch_items.items():
             patch_item.select(pid == self.selected_patch_id)
+
+    def update_selected_patch_position(self):
+        """Updates the initial position of the currently selected patch."""
+        if self.selected_patch_id is None:
+            return
+
+        try:
+            new_x = float(self.patch_x_input.text())
+            new_y = float(self.patch_y_input.text())
+        except ValueError:
+            print("Invalid coordinates. Please enter numbers.")
+            return
+
+        if not (0 <= new_x <= DEVICE_WIDTH_MM and 0 <= new_y <= DEVICE_HEIGHT_MM):
+            print(f"Coordinates out of bounds. X must be 0-{DEVICE_WIDTH_MM}, Y must be 0-{DEVICE_HEIGHT_MM}.")
+            return
+
+        patch_item = self.patch_items.get(self.selected_patch_id)
+        if patch_item:
+            new_pos = QPointF(new_x, new_y)
+            # This is an "authored" change, so we update the ground truth.
+            self.initial_patch_positions[self.selected_patch_id] = new_pos
+            print(f"Patch {self.selected_patch_id} initial position updated to ({new_x:.1f}, {new_y:.1f}).")
+            
+            self.reset_patches_to_initial_pos()
+            
+            if self.trajectory_points and self.current_trajectory_item:
+                self.clear_all_drawn_trajectories()
+                print("Current trajectory cleared because patch starting position was moved.")
+
+    def get_patch_final_pos(self, target_patch_id):
+        """Calculates the final position of a single patch after all its moves in the sequence."""
+        pos = self.initial_patch_positions.get(target_patch_id)
+        if pos is None:
+            return QPointF(0, 0)
+
+        for block in self.sequence_blocks:
+            if block['type'] == 'MOVE' and block['patch_id'] == target_patch_id:
+                # The new position is the end of the trajectory, offset for the top-left corner
+                pos = block['trajectory'][-1] - QPointF(10, 15)
+        
+        return pos
 
     def canvas_mouse_press(self, event):
         if self.is_simulating or self.is_hardware_running or not self.selected_patch_id: return
@@ -622,8 +728,10 @@ class MainWindow(QMainWindow):
         if not (0 <= pos.x() <= DEVICE_WIDTH_MM and 0 <= pos.y() <= DEVICE_HEIGHT_MM): return
 
         if not self.trajectory_points:
-            start_pos = self.get_conceptual_patch_center(self.selected_patch_id)
-            self.trajectory_points.append(start_pos)
+            # Calculate where the patch *will be* before this new move starts
+            start_pos_corner = self.get_patch_final_pos(self.selected_patch_id)
+            start_pos_center = start_pos_corner + QPointF(10, 15)
+            self.trajectory_points.append(start_pos_center)
 
         last_point = self.trajectory_points[-1]
         dx = abs(pos.x() - last_point.x())
@@ -640,10 +748,9 @@ class MainWindow(QMainWindow):
     def get_conceptual_patch_center(self, patch_id):
         if patch_id not in self.patch_items: return QPointF(0, 0)
         
-        # 패치의 현재 시각적 위치를 기준으로 계산
+        # This function should always return the center based on the CURRENT VISUAL position
         current_visual_pos = self.patch_items[patch_id].pos()
         return current_visual_pos + QPointF(10, 15)
-
 
     def draw_current_trajectory(self):
         if self.current_trajectory_item: self.scene.removeItem(self.current_trajectory_item)
@@ -690,14 +797,13 @@ class MainWindow(QMainWindow):
                 "force": {"enabled": self.f_enabled.isChecked(), "mode": self.f_mode.currentText(), "magnitude": self.f_mag.value(), "duration": int(float(self.f_dur.text()) * 1000)},
                 "vibration": {"enabled": self.v_enabled.isChecked(), "mode": self.v_mode.currentText(), "frequency": self.v_freq.value(), "amplitude": self.v_amp.value(), "duration": int(float(self.v_dur.text()) * 1000)},
                 "heat": {"enabled": self.h_enabled.isChecked(), "duration": int(float(self.h_dur.text()) * 1000)},
-                "wait": {"enabled": self.w_enabled.isChecked(), "duration": int(float(self.w_dur.text()) * 1000)}, # Add wait config
+                "wait": {"enabled": self.w_enabled.isChecked(), "duration": int(float(self.w_dur.text()) * 1000)},
                 "wait_for_move": self.wait_for_move_cb.isChecked()
             }
         except (ValueError, TypeError):
             print("Error: Invalid duration value. Please enter a valid number.")
             return
 
-        # Check if any haptic or wait is enabled
         if not any(c['enabled'] for name, c in config.items() if name != 'wait_for_move'): return
 
         if self.editing_block_index is not None:
@@ -718,7 +824,6 @@ class MainWindow(QMainWindow):
             self.v_enabled.setChecked(config['vibration']['enabled']); self.v_mode.setCurrentText(config.get('vibration', {}).get('mode', 'Attract')); self.v_freq.setValue(config['vibration']['frequency']); self.v_amp.setValue(config['vibration']['amplitude']); self.v_dur.setText(str(config['vibration']['duration'] / 1000.0))
             self.h_enabled.setChecked(config['heat']['enabled']); self.h_dur.setText(str(config['heat']['duration'] / 1000.0))
             
-            # Load wait config
             wait_config = config.get('wait', {'enabled': False, 'duration': 1000})
             self.w_enabled.setChecked(wait_config['enabled'])
             self.w_dur.setText(str(wait_config['duration'] / 1000.0))
@@ -729,7 +834,6 @@ class MainWindow(QMainWindow):
             elif config['vibration']['enabled']: self.tabs.setCurrentIndex(1)
             elif config['heat']['enabled']: self.tabs.setCurrentIndex(2)
             elif wait_config['enabled']: self.tabs.setCurrentIndex(3)
-
 
     def delete_sequence_block(self):
         selected_items = self.sequence_list.selectedItems()
@@ -744,28 +848,18 @@ class MainWindow(QMainWindow):
                     self.scene.removeItem(path_item)
             del self.sequence_blocks[row]
         self.update_sequence_list()
-        self.update_all_patch_visuals()
-
+        self.reset_patches_to_initial_pos()
 
     def on_sequence_moved(self, parent, start, end, dest, row):
         item = self.sequence_blocks.pop(start); self.sequence_blocks.insert(row if row < start else row - 1, item)
         self.update_sequence_list()
-        self.update_all_patch_visuals()
+        self.reset_patches_to_initial_pos()
 
-    def update_all_patch_visuals(self):
-        for patch_id, patch_item in self.patch_items.items():
-            if patch_id in self.initial_patch_positions:
-                patch_item.setPos(self.initial_patch_positions[patch_id])
-
-        for block in self.sequence_blocks:
-            if block['type'] == 'MOVE':
-                patch_id = block['patch_id']
-                patch_item = self.patch_items.get(patch_id)
-                if patch_item:
-                    end_point = block['trajectory'][-1]
-                    new_pos = end_point - QPointF(10, 15)
-                    patch_item.setPos(new_pos)
-
+    def reset_patches_to_initial_pos(self):
+        """Resets all patch visuals to their authored initial positions."""
+        for patch_id, pos in self.initial_patch_positions.items():
+            if patch_id in self.patch_items:
+                self.patch_items[patch_id].setPos(pos)
 
     def update_sequence_list(self):
         current_selection_rows = {self.sequence_list.row(item) for item in self.sequence_list.selectedItems()}
@@ -799,7 +893,6 @@ class MainWindow(QMainWindow):
         self.is_simulating = True
         self.simulate_btn.setText("⏹️ Stop Simulation")
 
-
     def stop_simulation(self):
         print("Simulation stopped.")
         self.is_simulating = False
@@ -814,10 +907,7 @@ class MainWindow(QMainWindow):
             print("Arduinos not connected or sequence already running."); return
         if not self.sequence_blocks: return
         
-        # Reset all visual patch positions to their initial state before running
-        for patch_id, initial_pos in self.initial_patch_positions.items():
-            if patch_id in self.patch_items:
-                self.patch_items[patch_id].setPos(initial_pos)
+        self.reset_patches_to_initial_pos()
 
         self.is_hardware_running = True
         self.hardware_step_index = 0
@@ -835,12 +925,11 @@ class MainWindow(QMainWindow):
         print(f"\nExecuting Block {self.hardware_step_index + 1}/{len(self.sequence_blocks)}: {block['type']}")
 
         if block['type'] == 'MOVE':
-            self.hardware_waypoint_index = 1 # Start from the first waypoint
+            self.hardware_waypoint_index = 0 
             self.send_next_hw_waypoint()
 
         elif block['type'] == 'HAPTIC':
             patch_id = block['patch_id']
-            # Get the *current* conceptual position of the patch, which may have been updated by a previous MOVE
             target_pos = self.get_conceptual_patch_center(patch_id)
             
             scaled_x = target_pos.x() * UI_TO_REAL_SCALE_X
@@ -879,22 +968,17 @@ class MainWindow(QMainWindow):
         freq = c['vibration']['frequency'] if c['vibration']['enabled'] else 0
         amp = int(c['vibration']['amplitude'] * 2.55) if c['vibration']['enabled'] else 0
         
-        # Calculate max duration including wait time
         durations = [d['duration'] for n, d in c.items() if n != 'wait_for_move' and d.get('enabled')]
         max_duration = max(durations) if durations else 0
         
         heat_on = 1 if c['heat']['enabled'] else 0
         
-        # The command sent to the actuator doesn't need to know about "wait",
-        # as the wait is handled by the Python script's QTimer.
         cmd = f"H,{force_mode},{mag},{vibration_mode},{freq},{amp},{max_duration},{heat_on}\n"
         
         print(f"  - Move complete. Sending to Actuator: {cmd.strip()}")
         self.actuator_arduino.write(cmd.encode())
         
-        # The timer waits for the longest specified duration before proceeding.
         QTimer.singleShot(max_duration + 200, self.proceed_to_next_block)
-
 
     def send_next_hw_waypoint(self):
         if not self.is_hardware_running: return
@@ -902,10 +986,49 @@ class MainWindow(QMainWindow):
         trajectory = block['trajectory']
         haptic_type = block.get('haptic_on_move', 'None')
 
-        # Start haptics on the first move segment
-        if self.hardware_waypoint_index == 1:
+        # Check if the trajectory is finished
+        if self.hardware_waypoint_index >= len(trajectory):
+            print("Move block finished.")
+            # Stop any haptics that were running during the move
+            if haptic_type != 'None' and self.actuator_arduino:
+                print("  - Stopping haptics-on-move.")
+                self.actuator_arduino.write(b"H,0,0,0,0,0,0,0\n")
+            
+            patch_id = block['patch_id']
+            patch_item = self.patch_items.get(patch_id)
+            if patch_item:
+                # Get the final destination from the trajectory data
+                end_point_center = trajectory[-1]
+                final_pos_corner = end_point_center - QPointF(10, 15)
+                
+                # 1. Update the "ground truth" initial position for subsequent blocks
+                self.initial_patch_positions[patch_id] = final_pos_corner
+                
+                # 2. Explicitly set the visual position to the final destination
+                patch_item.setPos(final_pos_corner)
+                print(f"  - Patch {patch_id} position permanently updated to ({final_pos_corner.x():.1f}, {final_pos_corner.y():.1f})")
+
+            # Clear the moving patch ID so it stops following the actuator
+            self.moving_patch_id = None
+            
+            # Move to the next block in the sequence
+            self.proceed_to_next_block()
+            return
+
+        # This is the first step (index 0): moving the actuator TO the patch's start position
+        if self.hardware_waypoint_index == 0:
+            # Ensure the patch is NOT being animated during this initial move
+            self.moving_patch_id = None 
+            print("  - Moving actuator to trajectory start point.")
+
+        # This is the second step (index 1): actuator has arrived and now starts the actual trajectory
+        elif self.hardware_waypoint_index == 1:
+            # Now, set the patch to start animating/following the actuator
+            self.moving_patch_id = block['patch_id']
+            print(f"  - Actuator at start. Beginning trajectory for Patch {self.moving_patch_id}.")
+            
+            # If there's a haptic effect for the move, turn it on now
             if haptic_type != 'None':
-                self.moving_patch_id = block['patch_id']
                 cmd = None
                 if haptic_type == "Force (Attraction)":
                     cmd = "H,1,255,0,0,0,0,0\n"
@@ -916,28 +1039,7 @@ class MainWindow(QMainWindow):
                     print(f"  - Starting haptics for trajectory: {cmd.strip()}")
                     self.actuator_arduino.write(cmd.encode())
 
-        if self.hardware_waypoint_index >= len(trajectory):
-            print("Move block finished.")
-            if haptic_type != 'None':
-                if self.actuator_arduino:
-                    print("  - Stopping haptics-on-move.")
-                    self.actuator_arduino.write(b"H,0,0,0,0,0,0,0\n")
-                
-                # Update the patch's base position permanently after a move
-                patch_id = block['patch_id']
-                patch_item = self.patch_items.get(patch_id)
-                if patch_item:
-                    end_point = trajectory[-1]
-                    new_pos = end_point - QPointF(10, 15)
-                    self.initial_patch_positions[patch_id] = new_pos
-                    patch_item.setPos(new_pos)
-                    print(f"  - Patch {patch_id} final position updated to ({new_pos.x():.1f}, {new_pos.y():.1f})")
-            
-            self.moving_patch_id = None
-            
-            self.proceed_to_next_block()
-            return
-
+        # Get the target point for the current waypoint
         target_point = trajectory[self.hardware_waypoint_index]
         
         scaled_x = target_point.x() * UI_TO_REAL_SCALE_X
@@ -976,13 +1078,6 @@ class MainWindow(QMainWindow):
         self.send_to_hw_btn.setEnabled(True)
         self.stop_hw_btn.setEnabled(False)
 
-        if not finished:
-            print("Resetting patch positions due to stop.")
-            # Reset all visual patch positions to their initial state
-            for patch_id, initial_pos in self.initial_patch_positions.items():
-                if patch_id in self.patch_items:
-                    self.patch_items[patch_id].setPos(initial_pos)
-
         if self.actuator_arduino and self.actuator_arduino.is_open:
             self.actuator_arduino.write(b"H,0,0,0,0,0,0,0\n")
 
@@ -995,6 +1090,9 @@ class MainWindow(QMainWindow):
 
         status_text = "--- Hardware sequence finished. ---" if finished else "--- Hardware sequence stopped by user. ---"
         print(status_text)
+        
+        # Always reset visuals to the initial state after a run finishes or is stopped.
+        self.reset_patches_to_initial_pos()
 
 
 if __name__ == "__main__":
