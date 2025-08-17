@@ -116,15 +116,48 @@ class ToggleSwitch(QCheckBox):
     def hitButton(self, pos: QPoint): return self.contentsRect().contains(pos)
 
 class LabeledSlider(QWidget):
-    def __init__(self, text, min_val=0, max_val=100, suffix="%"):
+    def __init__(self, text, min_val=0, max_val=100, suffix=""):
         super().__init__()
-        layout = QHBoxLayout(self); layout.setContentsMargins(0, 5, 0, 5)
-        self.label = QLabel(text); self.slider = QSlider(Qt.Orientation.Horizontal); self.slider.setRange(min_val, max_val)
-        self.value_label = QLabel(f"{self.slider.value()}{suffix}"); self.value_label.setMinimumWidth(50)
-        layout.addWidget(self.label); layout.addWidget(self.slider); layout.addWidget(self.value_label)
-        self.slider.valueChanged.connect(lambda v, s=suffix: self.value_label.setText(f"{v}{s}"))
-    def value(self): return self.slider.value()
-    def setValue(self, v): self.slider.setValue(v)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 5, 0, 5)
+
+        self.label = QLabel(text)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(min_val, max_val)
+
+        self.value_edit = QLineEdit(str(self.slider.value()))
+        self.value_edit.setValidator(QIntValidator(min_val, max_val, self))
+        self.value_edit.setFixedWidth(50) 
+
+        self.suffix_label = QLabel(suffix)
+
+        layout.addWidget(self.label)
+        layout.addWidget(self.slider)
+        layout.addWidget(self.value_edit)
+        layout.addWidget(self.suffix_label)
+
+        self.slider.valueChanged.connect(self.update_editor_value)
+        self.value_edit.editingFinished.connect(self.update_slider_value)
+
+    def update_editor_value(self, value):
+        self.value_edit.blockSignals(True)
+        self.value_edit.setText(str(value))
+        self.value_edit.blockSignals(False)
+
+    def update_slider_value(self):
+        self.slider.blockSignals(True)
+        try:
+            value = int(self.value_edit.text())
+            self.slider.setValue(value)
+        except ValueError:
+            self.value_edit.setText(str(self.slider.value()))
+        self.slider.blockSignals(False)
+
+    def value(self):
+        return self.slider.value()
+
+    def setValue(self, v):
+        self.slider.setValue(v)
 
 class GridScene(QGraphicsScene):
     def __init__(self, *args, **kwargs):
@@ -180,14 +213,10 @@ class MainWindow(QMainWindow):
         self.moving_patch_id = None
         self.trajectory_points = []
         self.current_trajectory_item = None
-        self.is_simulating = False
-        self.simulation_items = {}
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.simulation_step)
         self.initial_patch_positions = {}
-        self.simulated_patch_states = {}
         self.actuator_pos = QPointF(0, 0)
-        self.simulation_state = "IDLE"
         self.transport_read_timer = QTimer(self)
         self.transport_read_timer.timeout.connect(self.read_transport_data)
 
@@ -246,14 +275,11 @@ class MainWindow(QMainWindow):
         self.connect_btn = QPushButton("Connect All")
         self.connect_btn.setCheckable(True)
         self.connect_btn.clicked.connect(self.toggle_connection)
-        self.home_btn = QPushButton("Home Actuator")
-        self.home_btn.clicked.connect(self.home_actuator)
         self.status_label = QLabel("Status: Disconnected")
         self.real_pos_label = QLabel("Real Pos: (0, 0)")
         hw_layout.addRow("Actuator Port:", self.actuator_port_combo)
         hw_layout.addRow("Transport Port:", self.transport_port_combo)
         hw_layout.addRow(self.refresh_ports_btn, self.connect_btn)
-        hw_layout.addRow(self.home_btn)
         hw_layout.addRow(self.status_label)
         hw_layout.addRow(self.real_pos_label)
         self.populate_ports()
@@ -318,7 +344,7 @@ class MainWindow(QMainWindow):
         force_tab = QWidget(); force_form = QFormLayout(force_tab); self.f_enabled = ToggleSwitch()
         f_enable_layout = QHBoxLayout(); f_enable_layout.addStretch(); f_enable_layout.addWidget(self.f_enabled); f_enable_layout.setContentsMargins(0,0,0,0)
         self.f_mode = QComboBox(); self.f_mode.addItems(["Attract", "Repel"])
-        self.f_mag = LabeledSlider("Magnitude")
+        self.f_mag = LabeledSlider("Magnitude", 0, 100, "%")
         self.f_dur = QLineEdit("3.0"); self.f_dur.setValidator(double_validator)
         force_form.addRow("Enable Force", f_enable_layout)
         force_form.addRow("Mode:", self.f_mode); force_form.addRow(self.f_mag); force_form.addRow("Duration (s):", self.f_dur)
@@ -328,7 +354,7 @@ class MainWindow(QMainWindow):
         v_enable_layout = QHBoxLayout(); v_enable_layout.addStretch(); v_enable_layout.addWidget(self.v_enabled); v_enable_layout.setContentsMargins(0,0,0,0)
         self.v_mode = QComboBox(); self.v_mode.addItems(["Attract", "Repel"])
         self.v_freq = LabeledSlider("Frequency", 1, 500, "Hz")
-        self.v_amp = LabeledSlider("Amplitude"); self.v_dur = QLineEdit("3.0"); self.v_dur.setValidator(double_validator)
+        self.v_amp = LabeledSlider("Amplitude", 0, 100, "%"); self.v_dur = QLineEdit("3.0"); self.v_dur.setValidator(double_validator)
         vib_form.addRow("Enable Vibration", v_enable_layout); vib_form.addRow("Mode:", self.v_mode)
         vib_form.addRow(self.v_freq); vib_form.addRow(self.v_amp); vib_form.addRow("Duration (s):", self.v_dur)
 
@@ -376,7 +402,7 @@ class MainWindow(QMainWindow):
         traj_group = QGroupBox("Trajectory Control")
         traj_layout = QFormLayout(traj_group)
         self.move_haptic_combo = QComboBox()
-        self.move_haptic_combo.addItems(["None", "Force (Attraction)", "Vibration (Attraction)"])
+        self.move_haptic_combo.addItems(["Force (Attraction)", "Vibration (Attraction)"])
 
         add_traj_btn = QPushButton("➡️ Add Drawn Trajectory")
         add_traj_btn.clicked.connect(self.add_trajectory_block)
@@ -399,17 +425,13 @@ class MainWindow(QMainWindow):
         self.delete_block_btn.setObjectName("DangerButton"); self.delete_block_btn.clicked.connect(self.delete_sequence_block); btn_layout.addStretch(); btn_layout.addWidget(self.delete_block_btn)
 
         exec_group = QGroupBox("Execution"); exec_layout = QVBoxLayout(exec_group)
-        sim_layout = QHBoxLayout()
-        self.simulate_btn = QPushButton("▶️ Run Simulation"); self.simulate_btn.setObjectName("PrimaryButton")
-        self.simulate_btn.clicked.connect(self.toggle_simulation)
-        sim_layout.addWidget(self.simulate_btn)
         hw_layout = QHBoxLayout()
         self.send_to_hw_btn = QPushButton("🚀 Send to Actuator"); self.send_to_hw_btn.clicked.connect(self.run_hardware_sequence)
         self.stop_hw_btn = QPushButton("🛑 Emergency Stop")
         self.stop_hw_btn.setObjectName("DangerButton")
         self.stop_hw_btn.clicked.connect(self.emergency_stop)
         hw_layout.addWidget(self.send_to_hw_btn, 2); hw_layout.addWidget(self.stop_hw_btn, 1)
-        exec_layout.addLayout(sim_layout); exec_layout.addLayout(hw_layout)
+        exec_layout.addLayout(hw_layout)
 
         seq_layout.addWidget(QLabel("Drag to reorder. Dbl-Click to edit.", objectName="HintLabel")); seq_layout.addWidget(self.sequence_list)
         seq_layout.addLayout(btn_layout); seq_layout.addWidget(exec_group)
@@ -518,13 +540,6 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Status: Connection failed ({e})")
             self.close_connections(set_disconnected_status=False)
 
-    def home_actuator(self):
-        if self.transport_arduino and self.transport_arduino.is_open:
-            print("Sending Home command to transport.")
-            self.transport_arduino.write(b"H\n")
-        else:
-            print("Transport arduino not connected.")
-
     def read_transport_data(self):
         if not self.transport_arduino or not self.transport_arduino.in_waiting > 0:
             return
@@ -563,7 +578,6 @@ class MainWindow(QMainWindow):
 
     def emergency_stop(self):
         print("🛑 EMERGENCY STOP TRIGGERED!")
-        if self.is_simulating: self.stop_simulation()
         self.stop_hardware_sequence(finished=False)
 
     def randomize_patch_inputs(self):
@@ -723,7 +737,7 @@ class MainWindow(QMainWindow):
         return pos
 
     def canvas_mouse_press(self, event):
-        if self.is_simulating or self.is_hardware_running or not self.selected_patch_id: return
+        if self.is_hardware_running or not self.selected_patch_id: return
         pos = self.canvas.mapToScene(event.pos())
         if not (0 <= pos.x() <= DEVICE_WIDTH_MM and 0 <= pos.y() <= DEVICE_HEIGHT_MM): return
 
@@ -884,23 +898,7 @@ class MainWindow(QMainWindow):
             if row < self.sequence_list.count(): self.sequence_list.item(row).setSelected(True)
         self.sequence_list.model().rowsMoved.connect(self.on_sequence_moved)
 
-    def toggle_simulation(self):
-        if self.is_simulating: self.stop_simulation()
-        else: self.start_simulation()
-
-    def start_simulation(self):
-        print("Simulation started (logic unchanged).")
-        self.is_simulating = True
-        self.simulate_btn.setText("⏹️ Stop Simulation")
-
-    def stop_simulation(self):
-        print("Simulation stopped.")
-        self.is_simulating = False
-        self.simulate_btn.setText("▶️ Run Simulation")
-
     def simulation_step(self): pass
-    def execute_current_step(self): pass
-    def show_haptic_feedback(self, target_patch, config): pass
 
     def run_hardware_sequence(self):
         if not self.actuator_arduino or not self.transport_arduino or self.is_hardware_running:
@@ -1007,6 +1005,11 @@ class MainWindow(QMainWindow):
                 # 2. Explicitly set the visual position to the final destination
                 patch_item.setPos(final_pos_corner)
                 print(f"  - Patch {patch_id} position permanently updated to ({final_pos_corner.x():.1f}, {final_pos_corner.y():.1f})")
+
+                # NEW: Update the input fields if the moved patch is the selected one
+                if patch_id == self.selected_patch_id:
+                    self.patch_x_input.setText(f"{final_pos_corner.x():.1f}")
+                    self.patch_y_input.setText(f"{final_pos_corner.y():.1f}")
 
             # Clear the moving patch ID so it stops following the actuator
             self.moving_patch_id = None
